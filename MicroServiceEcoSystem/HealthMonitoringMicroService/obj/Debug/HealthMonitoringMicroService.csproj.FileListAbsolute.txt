@@ -54,3 +54,5 @@ C:\Development\MicroServiceEcoSystem\HealthMonitoringMicroService\bin\Debug\Seri
 C:\Development\MicroServiceEcoSystem\HealthMonitoringMicroService\bin\Debug\quartz-jobs.config
 C:\Development\MicroServiceEcoSystem\HealthMonitoringMicroService\bin\Debug\Serilog.pdb
 C:\Development\MicroServiceEcoSystem\HealthMonitoringMicroService\obj\Debug\HealthMonitoringMicroService.csprojAssemblyReference.cache
+C:\Users\frank\RiderProjects\CSharpMS\MicroServiceEcoSystem\HealthMonitoringMicroService\obj\Debug\HealthMonitoringMicroService.csproj.AssemblyReference.cache
+C:\Users\frank\RiderProjects\CSharpMS\MicroServiceEcoSystem\HealthMonitoringMicroService\obj\Debug\HealthMonitoringMicroService.csproj.CoreCompileInputs.cache

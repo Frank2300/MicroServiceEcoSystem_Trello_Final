@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
+using RestSharp;
+using System.Net;
 
 namespace TrelloMicroService
 {
@@ -59,8 +62,16 @@ namespace TrelloMicroService
         ////////////////////////////////////////////////////////////////////////////////////////////////////
 
         public Card card { get; set; }
-        /// <summary>   The random. </summary>
-        private Random random = new Random();
+/// <summary>   The random. </summary>
+private Random random = new Random();
+
+private const string TrelloApiBaseUrl = "https://api.trello.com/1";
+private const string TrelloApiKey = "b4596a2069491cce445777712c528041";
+private const string TrelloToken = "ATTA44fbd9ca6fb4c658954ee0295d1ab554160322c217aaa667e5b16cf10276f1fcA4CBB72D";
+
+private string boardId;
+private string listId;
+private string cardId;
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////
         /// <summary>
@@ -85,14 +96,23 @@ namespace TrelloMicroService
         {
             base.Start(host);
             Subscribe();
-            trello = new Trello("16548e3857c79f75e31bb40002a0595b"); 
+            trello = new Trello("b4596a2069491cce445777712c528041"); 
             var url = trello.GetAuthorizationUrl("dummy", Scope.ReadWrite);
-            trello.Authorize("6a5a70e52074548a989ce1ac8eb48bb1dd60f7ac80645caf5fa0b1814727c955");
+            trello.Authorize("ATTA44fbd9ca6fb4c658954ee0295d1ab554160322c217aaa667e5b16cf10276f1fcA4CBB72D");
 
 
 
 
             var expectedBoard = CreateBoard("Microservice Ecosystem", "Hands on Microservices with C#");
+
+            // SAFEGUARD: With old TrelloNet, the board object may be null even when Trello created the board.
+            // Therefore check the id returned by the direct REST call instead.
+            if (string.IsNullOrEmpty(boardId))
+            {
+                Console.WriteLine("CRITICAL ERROR: Trello API failed to create the board or did not return a board id.");
+                return false;
+            }
+
             var expectedList = CreateList("Drafts");
 
             for (int x=0; x<10; x++)
@@ -100,7 +120,6 @@ namespace TrelloMicroService
                     x % 2 == 0
                         ? SystemClock.Instance.GetCurrentInstant().ToDateTimeUtc().ToLocalTime().AddDays(12)
                         : DateTime.MinValue);
-
 
             CreateList("Proofs");
 
@@ -110,7 +129,6 @@ namespace TrelloMicroService
                         ? SystemClock.Instance.GetCurrentInstant().ToDateTimeUtc().ToLocalTime().AddDays(24)
                         : DateTime.MinValue);
 
-
             CreateList("Final Copies");
 
             for (int x = 0; x < 10; x++)
@@ -118,7 +136,6 @@ namespace TrelloMicroService
                     x % 2 == 0
                         ? SystemClock.Instance.GetCurrentInstant().ToDateTimeUtc().ToLocalTime().AddDays(36)
                         : DateTime.MinValue);
-
 
             return true;
         }
@@ -203,26 +220,48 @@ namespace TrelloMicroService
         /// <returns>   The new board. </returns>
         ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        private ExpectedObject CreateBoard(string name, string desc)
-        {
-           board = trello.Boards.Add(name);
-            
-            if (board != null)
-            {
-                board.Closed = false;
-                board.Pinned = true;
-                board.Desc = desc;
-                board.Prefs = new BoardPreferences
-                {
-                    Comments = CommentPermission.Members,
-                    Invitations = InvitationPermission.Members,
-                    PermissionLevel = PermissionLevel.Public,
-                    Voting = VotingPermission.Members
-                };
-            }
-            
-            return board.ToExpectedObject();
-        }
+private ExpectedObject CreateBoard(string name, string desc)
+{
+    var client = new RestClient(TrelloApiBaseUrl);
+    var request = new RestRequest("boards", Method.POST);
+
+    request.AddParameter("key", TrelloApiKey);
+    request.AddParameter("token", TrelloToken);
+    request.AddParameter("name", name);
+    request.AddParameter("desc", desc);
+    request.AddParameter("defaultLists", "false");
+    request.AddParameter("prefs_permissionLevel", "public");
+    request.AddParameter("prefs_voting", "members");
+    request.AddParameter("prefs_comments", "members");
+    request.AddParameter("prefs_invitations", "members");
+
+    var response = client.Execute(request);
+
+    if (response == null || response.StatusCode < HttpStatusCode.OK || response.StatusCode >= HttpStatusCode.MultipleChoices)
+    {
+        Console.WriteLine("CreateBoard failed: " + (response == null ? "No response" : response.Content));
+        boardId = null;
+        return null;
+    }
+
+    var json = JObject.Parse(response.Content);
+    boardId = json.Value<string>("id");
+
+    if (string.IsNullOrEmpty(boardId))
+    {
+        Console.WriteLine("CreateBoard failed: Trello did not return a board id. Response: " + response.Content);
+        return null;
+    }
+
+    Console.WriteLine("Created Trello board: " + name + " / id: " + boardId);
+
+    return new
+    {
+        Id = boardId,
+        Name = name,
+        Desc = desc
+    }.ToExpectedObject();
+}
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////
         /// <summary>   Creates a list. </summary>
@@ -232,22 +271,50 @@ namespace TrelloMicroService
         /// <returns>   The new list. </returns>
         ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        private ExpectedObject CreateList(string name)
-        {
-            // Create a new list
-            BoardId bi = new BoardId(board.GetBoardId());
-            list = trello.Lists.Add(new NewList(name, bi));
+private ExpectedObject CreateList(string name)
+{
+    if (string.IsNullOrEmpty(boardId))
+    {
+        Console.WriteLine("CreateList failed: boardId is empty.");
+        return null;
+    }
 
-            if (list != null)
-            {
-                list.Closed = false;
-                list.IdBoard = board.GetBoardId();
-                list.Name = name;
-                list.Pos = 1;
-            }
-            
-            return list.ToExpectedObject();
-        }
+    var client = new RestClient(TrelloApiBaseUrl);
+    var request = new RestRequest("lists", Method.POST);
+
+    request.AddParameter("key", TrelloApiKey);
+    request.AddParameter("token", TrelloToken);
+    request.AddParameter("name", name);
+    request.AddParameter("idBoard", boardId);
+    request.AddParameter("pos", "bottom");
+
+    var response = client.Execute(request);
+
+    if (response == null || response.StatusCode < HttpStatusCode.OK || response.StatusCode >= HttpStatusCode.MultipleChoices)
+    {
+        Console.WriteLine("CreateList failed: " + (response == null ? "No response" : response.Content));
+        listId = null;
+        return null;
+    }
+
+    var json = JObject.Parse(response.Content);
+    listId = json.Value<string>("id");
+
+    if (string.IsNullOrEmpty(listId))
+    {
+        Console.WriteLine("CreateList failed: Trello did not return a list id. Response: " + response.Content);
+        return null;
+    }
+
+    Console.WriteLine("Created Trello list: " + name + " / id: " + listId);
+
+    return new
+    {
+        Id = listId,
+        Name = name,
+        IdBoard = boardId
+    }.ToExpectedObject();
+}
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////
         /// <summary>   Creates a card. </summary>
@@ -260,85 +327,99 @@ namespace TrelloMicroService
         /// <returns>   The new card. </returns>
         ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        private ExpectedObject CreateCard(string name, string desc, bool closed, DateTime dueDate)
-        {
-            Card c = trello.Cards.Add(name, list);
-            if (c != null)
-            {
-                c.Desc = desc;
-                c.Closed = closed;
-                //c.IdList = "4f2b8b4d4f2cb9d16d3684c1";
-                c.IdBoard = board.GetBoardId();
-                if (dueDate > DateTime.MinValue)
-                    c.Due = dueDate;
-                c.Labels = new List<Label>();
-                c.IdShort = 1;
-                c.Checklists = new List<Card.Checklist>();
-                c.Url = "https://trello.com/b/bz7S3fiv/trello-microservice";
-                c.ShortUrl = "https://trello.com/b/bz7S3fiv";
-                c.Pos = 32768;
-                c.DateLastActivity = SystemClock.Instance.GetCurrentInstant().ToDateTimeUtc().ToLocalTime();
-                c.Badges = new Card.CardBadges
-                {
-                    Votes = 1,
-                    Attachments = 1,
-                    Comments = 2,
-                    CheckItems = 0,
-                    CheckItemsChecked = 0,
-                    Description = true,
-                    Due = SystemClock.Instance.GetCurrentInstant().ToDateTimeUtc().ToLocalTime().AddDays(1),
-                    FogBugz = ""
-                };
-                
-                c.IdMembers = new List<string> {"4f2b8b464f2cb9d16d368326"};
-            }
+private ExpectedObject CreateCard(string name, string desc, bool closed, DateTime dueDate)
+{
+    if (string.IsNullOrEmpty(listId))
+    {
+        Console.WriteLine("CreateCard failed: listId is empty.");
+        return null;
+    }
 
+    var client = new RestClient(TrelloApiBaseUrl);
+    var request = new RestRequest("cards", Method.POST);
 
+    request.AddParameter("key", TrelloApiKey);
+    request.AddParameter("token", TrelloToken);
+    request.AddParameter("idList", listId);
+    request.AddParameter("name", name);
+    request.AddParameter("desc", desc);
+    request.AddParameter("closed", closed.ToString().ToLowerInvariant());
 
-            if (dueDate == DateTime.MinValue)
-            {
-                Label l = new Label
-                {
-                    Color = Color.Green,
-                    IdBoard = board.GetBoardId(),
-                    Name = "Green Label"
-                };
-                c.Labels.Add(l);
+    if (dueDate > DateTime.MinValue)
+        request.AddParameter("due", dueDate.ToString("o"));
 
-                //// Label card
-                trello.Cards.AddLabel(c, Color.Green);
-            }
-            trello.Cards.Update(c);
+    var response = client.Execute(request);
 
-            // Assign member to card
-            trello.Cards.AddMember(c, trello.Members.Me());
+    if (response == null || response.StatusCode < HttpStatusCode.OK || response.StatusCode >= HttpStatusCode.MultipleChoices)
+    {
+        Console.WriteLine("CreateCard failed: " + (response == null ? "No response" : response.Content));
+        cardId = null;
+        return null;
+    }
 
-            // Comment on a card
-            trello.Cards.AddComment(c, RandomString(50));
+    var json = JObject.Parse(response.Content);
+    cardId = json.Value<string>("id");
 
-            Card.CheckItem ci = new Card.CheckItem();
-            ci.Pos = 994;
-            ci.Name = "Draft";
-            ci.Id = RandomString(12);
+    if (string.IsNullOrEmpty(cardId))
+    {
+        Console.WriteLine("CreateCard failed: Trello did not return a card id. Response: " + response.Content);
+        return null;
+    }
 
-            Card.Checklist cl = new Card.Checklist();
-            cl.IdBoard = board.GetBoardId();
-            cl.Name = "To Do";
-            cl.Pos = 2485;
-            cl.CheckItems = new List<Card.CheckItem>();
-            c.Checklists.Add(cl);
-            trello.Cards.Update(c);
+    Console.WriteLine("Created Trello card: " + name + " / id: " + cardId);
 
-            cl.CheckItems.Add(ci);
-            trello.Cards.Update(c);
+    if (dueDate == DateTime.MinValue)
+    {
+        AddLabelToCard(cardId, "green");
+    }
 
+    AddCommentToCard(cardId, RandomString(50));
 
+    return new
+    {
+        Id = cardId,
+        Name = name,
+        Desc = desc,
+        IdList = listId
+    }.ToExpectedObject();
+}
 
+private void AddLabelToCard(string trelloCardId, string color)
+{
+    var client = new RestClient(TrelloApiBaseUrl);
+    var request = new RestRequest("cards/{id}/labels", Method.POST);
 
+    request.AddUrlSegment("id", trelloCardId);
+    request.AddParameter("key", TrelloApiKey);
+    request.AddParameter("token", TrelloToken);
+    request.AddParameter("color", color);
 
-            card = c;
-            return c.ToExpectedObject();
-        }
+    var response = client.Execute(request);
+
+    if (response == null || response.StatusCode < HttpStatusCode.OK || response.StatusCode >= HttpStatusCode.MultipleChoices)
+    {
+        Console.WriteLine("AddLabelToCard failed: " + (response == null ? "No response" : response.Content));
+    }
+}
+
+private void AddCommentToCard(string trelloCardId, string text)
+{
+    var client = new RestClient(TrelloApiBaseUrl);
+    var request = new RestRequest("cards/{id}/actions/comments", Method.POST);
+
+    request.AddUrlSegment("id", trelloCardId);
+    request.AddParameter("key", TrelloApiKey);
+    request.AddParameter("token", TrelloToken);
+    request.AddParameter("text", text);
+
+    var response = client.Execute(request);
+
+    //response.StatusCode < HttpStatusCode.OK || response.StatusCode >= HttpStatusCode.MultipleChoices>
+    
+    {
+        Console.WriteLine("AddCommentToCard failed: " + (response == null ? "No response" : response.Content));
+    }
+}
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////
         /// <summary>   Creates check list. </summary>
