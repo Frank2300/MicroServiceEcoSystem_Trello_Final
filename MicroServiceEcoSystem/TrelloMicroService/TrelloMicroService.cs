@@ -66,8 +66,8 @@ namespace TrelloMicroService
 private Random random = new Random();
 
 private const string TrelloApiBaseUrl = "https://api.trello.com/1";
-private const string TrelloApiKey = "b4596a2069491cce445777712c528041";
-private const string TrelloToken = "ATTA44fbd9ca6fb4c658954ee0295d1ab554160322c217aaa667e5b16cf10276f1fcA4CBB72D";
+private const string TrelloApiKey = "your_trello_api_key";
+private const string TrelloToken = "trello_api_token";
 
 private string boardId;
 private string listId;
@@ -96,9 +96,9 @@ private string cardId;
         {
             base.Start(host);
             Subscribe();
-            trello = new Trello("b4596a2069491cce445777712c528041"); 
+            trello = new Trello("your_trello_api_key"); 
             var url = trello.GetAuthorizationUrl("dummy", Scope.ReadWrite);
-            trello.Authorize("ATTA44fbd9ca6fb4c658954ee0295d1ab554160322c217aaa667e5b16cf10276f1fcA4CBB72D");
+            trello.Authorize("trello_api_token");
 
 
 
